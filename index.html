@@ -100,6 +100,7 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 .sheet .sec:first-of-type{border-top:0;margin-top:0;padding-top:0}
 .sheet .acts{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
 .sheet .acts .btn{flex:1}
+.sheet .col{display:flex;flex-direction:column;gap:10px}
 .cls{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
 .cls:last-child{border-bottom:0}
 .qr{background:#fff;border-radius:12px;padding:8px;display:flex;justify-content:center}
@@ -136,7 +137,7 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
    gửi lên Google Drive qua một Apps Script của chính thầy cô.
    Thư mục trên Drive: HK1 - <tên bài kiểm tra> / Lớp <lớp hoặc phòng>.
    Ảnh tạm và cài đặt chỉ lưu trên máy này. */
-const VERSION = '1.2';
+const VERSION = '1.3';
 const REPO = 'https://github.com/VTThinh28/chup-bai-drive';
 const CFG_KEY = 'chupbai.cfg.v1';
 const VIEW_KEY = 'chupbai.view.v1';
@@ -543,8 +544,9 @@ function movePage(sid, pid, dir) {
   [r.pages[i], r.pages[j]] = [r.pages[j], r.pages[i]];
   touch(r); saveRec(r); render();
 }
-async function leaveStudent() {
-  const sid = S.sid, r = sid && S.recs.get(sid);
+async function leaveStudent(sid) {
+  if (sid === undefined) sid = S.sid;
+  const r = sid && S.recs.get(sid);
   if (r) {
     if (r.pages.length) { if (r.status === 'nhap' && r.rev !== r.sentRev) queue(r); else if (r.status === 'nhap') r.status = 'xong'; }
     else if (r.fileName) queue(r);
@@ -553,8 +555,9 @@ async function leaveStudent() {
   }
 }
 async function openStudent(sid) {
-  if (S.screen === 'hs' && S.sid && S.sid !== sid) await leaveStudent();
-  S.screen = 'hs'; S.sid = sid; saveView(); render(); scrollTo(0, 0);
+  const prev = S.screen === 'hs' ? S.sid : null;
+  S.screen = 'hs'; S.sid = sid; saveView(); render(); scrollTo(0, 0);   // đổi màn hình ngay, để ảnh chụp về là hiện đúng bài
+  if (prev && prev !== sid) await leaveStudent(prev);
   pump();
 }
 async function backToList() {
@@ -578,6 +581,16 @@ function goNext() {
   const sid = newPaper(cur.ky, cur.lop);
   openCam(sid);
   openStudent(sid);
+}
+// Chụp xong một trang là hiện bảng: chụp tiếp trang sau, chụp học sinh tiếp theo, hoặc xong.
+function showAfterShot(sid) {
+  const r = S.recs.get(sid);
+  if (!r || S.screen !== 'hs' || S.sid !== sid) return;
+  const n = r.pages.length;
+  openModal('<h3>Bài ' + pad2(r.n) + ': đã chụp ' + n + ' trang</h3><div class="col">' +
+    '<button class="btn pri big" data-act="cam">📷 Chụp tiếp trang ' + (n + 1) + '</button>' +
+    '<button class="btn big" data-act="next">Chụp học sinh tiếp theo ›</button>' +
+    '<button class="btn big" data-act="back">Xong</button></div>');
 }
 function saveView() { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ screen: S.screen, sid: S.sid })); } catch (e) {} }
 
@@ -881,6 +894,7 @@ async function showPreview(pid) {
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act, pid = el.dataset.pid;
+  if (S.modal && S.modal.el.contains(el)) closeModal();
   switch (act) {
     case 'settings': showSettings(); break;
     case 'queue': showQueue(); break;
@@ -904,7 +918,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'inCam' || t.id === 'inPick') {
     const files = [...(t.files || [])]; const pk = S.pick; S.pick = null;
-    if (files.length && pk && pk.sid) addFiles(files, pk.sid, pk.replace);
+    if (files.length && pk && pk.sid) { addFiles(files, pk.sid, pk.replace); showAfterShot(pk.sid); }
   } else if (t.id === 'inBai') {
     const v = gon(t.value);
     cfg.bai = v; if (v) cfg.bais = remember(cfg.bais, v); saveCfg(); render();

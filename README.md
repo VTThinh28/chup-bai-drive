@@ -37,8 +37,11 @@ Nút **Chép mã máy chủ** không dùng được thì chép tay: mở [mã m�
 ## Chụp bài
 
 1. Chọn **Học kì 1** hoặc **Học kì 2**. Gõ tên **bài kiểm tra** (ví dụ "Giữa kì Toán 6") và **lớp hoặc phòng** (ví dụ 6/7, Phòng 12).
-2. Bấm **📷 Chụp bài mới**. Camera mở ngay, chụp trang 1. Bấm **Chụp trang 2**, **Chụp trang 3**…
-3. Bấm **Bài tiếp theo ›**. App gộp và lưu bài vừa chụp, rồi mở camera cho bài kế tiếp.
+2. Bấm **📷 Chụp bài mới**. Camera mở ngay, chụp trang 1.
+3. Chụp xong mỗi trang, app hiện ngay bảng 3 nút:
+   - **📷 Chụp tiếp trang 2** (3, 4…): camera mở luôn.
+   - **Chụp học sinh tiếp theo ›**: app gộp và lưu bài vừa chụp, rồi mở camera cho bài kế tiếp.
+   - **Xong**: lưu bài vừa chụp và về màn hình chính.
 4. Chụp xong, bấm **Xong**. Ở màn hình chính, bấm **Chép link thư mục** và gửi cho Claude để chấm.
 
 Mẹo chụp: đặt bài trên mặt bàn, chụp thẳng từ trên xuống, đủ sáng, không có bóng tay, thấy đủ 4 góc giấy. Bấm vào ảnh nhỏ để xem lớn, kiểm tra chữ có rõ không.
