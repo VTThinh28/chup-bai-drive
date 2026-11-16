@@ -22,7 +22,7 @@ App chụp bài kiểm tra trên điện thoại. Mỗi em chụp 2–3 trang, a
 2. Mở https://script.google.com bằng tài khoản Google muốn lưu bài, bấm **Dự án mới** (New project). Xoá hết mã có sẵn, dán mã vừa chép vào (Ctrl+V).
 3. Bấm biểu tượng **Lưu**. Đặt tên dự án, ví dụ "Chụp bài → Drive".
 4. Chọn hàm `kiemTra` trên thanh công cụ, bấm **Chạy** (Run). Google hỏi quyền: chọn tài khoản → **Nâng cao** (Advanced) → **Chuyển đến … (không an toàn)** → **Cho phép** (Allow). Đây là mã của chính thầy cô, chỉ chạy trong tài khoản của mình.
-5. Bấm **Triển khai** (Deploy) → **Lần triển khai mới** (New deployment) → bánh răng cạnh "Chọn loại" → **Ứng dụng web** (Web app), rồi chọn:
+5. Bấm **Triển khai** (Deploy) → **Tùy chọn triển khai mới** (New deployment) → bánh răng cạnh "Chọn loại" → **Ứng dụng web** (Web app), rồi chọn:
    - Thực thi với tư cách (Execute as): **Tôi** (Me)
    - Người có quyền truy cập (Who has access): **Bất kỳ ai** (Anyone)
 6. Bấm **Triển khai**. Chép **URL ứng dụng web**, dạng `https://script.google.com/macros/s/…/exec`.
@@ -65,7 +65,7 @@ Mẹo chụp: đặt bài trên mặt bàn, chụp thẳng từ trên xuống, �
 - **"Máy chủ trả về trang web thay vì dữ liệu"**: lúc triển khai chưa chọn "Bất kỳ ai", hoặc URL không có đuôi `/exec`.
 - **"Sai mã bí mật"**: mã trong app khác dòng `MA_BI_MAT`.
 - **"Máy chủ chưa đổi mã bí mật"**: mã dán vào script.google.com vẫn còn dòng `'doi-ma-nay'`. Bấm lại **Chép mã máy chủ** rồi dán đè, hoặc sửa tay dòng đó.
-- **Sửa Code.gs sau khi đã triển khai** (đổi mã, đổi thư mục): **Triển khai → Quản lý các lần triển khai** (Manage deployments) → biểu tượng bút chì → Phiên bản: **Phiên bản mới** (New version) → **Triển khai**. URL giữ nguyên.
+- **Sửa Code.gs sau khi đã triển khai** (đổi mã, đổi thư mục): **Triển khai → Quản lý các tùy chọn triển khai** (Manage deployments) → biểu tượng bút chì → Phiên bản: **Phiên bản mới** (New version) → **Triển khai**. URL giữ nguyên.
 - **Muốn lưu vào thư mục có sẵn**: điền mã thư mục vào dòng `ID_THU_MUC_GOC` trong Code.gs, rồi triển khai phiên bản mới.
 - **Đổi điện thoại**: mở app trên máy mới, quét lại mã QR, nhập lại danh sách lớp.
 
