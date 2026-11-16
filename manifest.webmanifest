@@ -1,7 +1,7 @@
 {
   "name": "Chụp bài → Drive",
   "short_name": "Chụp bài",
-  "description": "Chụp bài kiểm tra theo lớp, gộp các trang mỗi em thành một file PDF và lưu vào Google Drive.",
+  "description": "Chụp bài kiểm tra, gộp các trang của mỗi bài thành một file PDF và lưu vào Google Drive.",
   "lang": "vi",
   "start_url": "./",
   "scope": "./",

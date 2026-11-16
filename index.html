@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#1849a9">
 <title>Chụp bài lưu Drive</title>
-<meta name="description" content="Chụp bài kiểm tra theo lớp, gộp các trang của mỗi em thành một file PDF và lưu vào Google Drive.">
+<meta name="description" content="Chụp bài kiểm tra, gộp các trang của mỗi bài thành một file PDF và lưu vào Google Drive.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -114,11 +114,13 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 .qitem{padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
 .qitem:last-child{border-bottom:0}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.seg{display:flex;gap:10px}
+.seg .btn{flex:1}
 </style>
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <button class="btn icon-btn" id="btnBack" data-act="back" aria-label="Về danh sách" hidden>‹</button>
+  <button class="btn icon-btn" id="btnBack" data-act="back" aria-label="Về màn hình chính" hidden>‹</button>
   <h1 id="title">Chụp bài → Drive</h1>
   <span id="sync"></span>
   <button class="btn icon-btn" data-act="settings" aria-label="Cài đặt">⚙︎</button>
@@ -129,15 +131,15 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 <div class="busy" id="busy"><div><span class="spin"></span><span id="busyText">Đang xử lý ảnh…</span></div></div>
 <input type="file" id="inCam" class="sr" accept="image/*" capture="environment">
 <input type="file" id="inPick" class="sr" accept="image/*" multiple>
-<input type="file" id="inList" class="sr" accept=".xlsx,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain">
 
 <script>
 'use strict';
 /* ================== CHỤP BÀI → DRIVE ==================
-   Chụp từng trang bài làm của mỗi em, gộp thành 1 file PDF/em,
+   Chụp từng trang của mỗi bài làm, gộp thành 1 file PDF/bài (Bài 01, Bài 02…),
    gửi lên Google Drive qua một Apps Script của chính thầy cô.
-   Ảnh, danh sách lớp và cài đặt chỉ lưu trên máy này. */
-const VERSION = '1.0';
+   Thư mục trên Drive: HK1 - <tên bài kiểm tra> / Lớp <lớp hoặc phòng>.
+   Ảnh tạm và cài đặt chỉ lưu trên máy này. */
+const VERSION = '1.1';
 const REPO = 'https://github.com/VTThinh28/chup-bai-drive';
 const CFG_KEY = 'chupbai.cfg.v1';
 const VIEW_KEY = 'chupbai.view.v1';
@@ -151,7 +153,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const fmtMB = b => (b / 1048576).toFixed(b < 10485760 ? 1 : 0).replace('.', ',') + ' MB';
 
 /* ---------- cài đặt (localStorage) ---------- */
-const DEF = { api: '', key: '', ky: 'GK1', lop: '', lops: {}, folders: {}, maxSide: 2600, kys: ['GK1'] };
+const DEF = { api: '', key: '', hk: '1', bai: '', lop: '', bais: [], lopGanDay: [], folders: {}, maxSide: 2600 };
 let cfg = loadCfg();
 function loadCfg() {
   try { return Object.assign({}, DEF, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); }
@@ -195,47 +197,27 @@ const DB = (() => {
 })();
 
 /* ---------- trạng thái ---------- */
-const S = { recs: new Map(), screen: 'list', sid: null, q: '', pumping: false, timer: 0, pick: null, modal: null };
+const S = { recs: new Map(), screen: 'list', sid: null, pumping: false, timer: 0, pick: null, modal: null };
 
-/* ---------- học sinh, bài làm ---------- */
-function sidOf(ky, lop, kind, key) { return ky + '|' + lop + '|' + kind + '|' + key; }
-function listStudents(ky, lop) {
-  const names = cfg.lops[lop] || [];
-  const cnt = {};
-  names.forEach(n => { const k = norm(n); cnt[k] = (cnt[k] || 0) + 1; });
-  return names.map((ten, i) => {
-    const k = norm(ten);
-    return { sid: sidOf(ky, lop, 'L', cnt[k] > 1 ? k + '#' + (i + 1) : k), kind: 'L', stt: i + 1, ten, ky, lop };
-  });
+/* ---------- bài làm: mỗi bài là một file PDF "Bài 01.pdf" ---------- */
+// ky = "HK1 - <tên bài kiểm tra>" (thư mục cấp 1), lop = lớp hoặc phòng (thư mục "Lớp …" bên trong).
+function curKy() { const b = cfg.bai.trim(); return 'HK' + cfg.hk + (b ? ' - ' + b : ''); }
+function curLop() { return cfg.lop.trim(); }
+function folderLabel(ky, lop) { return ky + ' / Lớp ' + lop.replace(/\//g, '-'); }
+function papers(ky, lop) {
+  return [...S.recs.values()].filter(r => r.ky === ky && r.lop === lop).sort((a, b) => a.n - b.n);
 }
-function classView() {
-  const ky = cfg.ky, lop = cfg.lop;
-  const list = listStudents(ky, lop);
-  const ids = new Set(list.map(s => s.sid));
-  const others = [...S.recs.values()]
-    .filter(r => r.ky === ky && r.lop === lop && !ids.has(r.sid))
-    .sort((a, b) => (a.kind === b.kind ? (a.n || a.stt) - (b.n || b.stt) : (a.kind === 'L' ? -1 : 1)))
-    .map(r => ({ sid: r.sid, kind: r.kind, stt: r.stt, n: r.n, ten: r.ten, ky, lop }));
-  return { list, others, all: list.concat(others) };
-}
-function studentBySid(sid) {
-  const v = classView();
-  const s = v.all.find(x => x.sid === sid);
-  if (s) return s;
-  const r = S.recs.get(sid);
-  return r ? { sid, kind: r.kind, stt: r.stt, n: r.n, ten: r.ten, ky: r.ky, lop: r.lop } : null;
-}
-function label(st) { return st.kind === 'L' ? pad2(st.stt) + ' · ' + st.ten : 'Bài thêm ' + pad2(st.n) + (st.ten ? ' · ' + st.ten : ''); }
-function fileNameOf(r) { return r.kind === 'L' ? pad2(r.stt) + ' - ' + r.ten + '.pdf' : 'Thêm ' + pad2(r.n) + (r.ten ? ' - ' + r.ten : '') + '.pdf'; }
-function ensureRec(st) {
-  let r = S.recs.get(st.sid);
-  if (!r) {
-    r = { sid: st.sid, ky: st.ky, lop: st.lop, kind: st.kind, stt: st.stt || 0, n: st.n || 0, ten: st.ten || '',
-          pages: [], rev: 0, sentRev: 0, status: 'nhap', err: '', tries: 0, retryAt: 0,
-          fileName: '', fileId: '', fileUrl: '', createdAt: Date.now(), queuedAt: 0 };
-    S.recs.set(r.sid, r);
-  } else if (r.kind === 'L' && st.kind === 'L') { r.stt = st.stt; r.ten = st.ten; }
-  return r;
+function label(r) { return 'Bài ' + pad2(r.n) + ' · Lớp ' + r.lop; }
+function fileNameOf(r) { return 'Bài ' + pad2(r.n) + '.pdf'; }
+function newPaper(ky, lop) {
+  const ns = papers(ky, lop).map(r => r.n);
+  const n = (ns.length ? Math.max(...ns) : 0) + 1;
+  const r = { sid: ky + '|' + lop + '|T|' + n, ky, lop, kind: 'T', n, ten: '',
+              pages: [], rev: 0, sentRev: 0, status: 'nhap', err: '', tries: 0, retryAt: 0,
+              fileName: '', fileId: '', fileUrl: '', createdAt: Date.now(), queuedAt: 0 };
+  S.recs.set(r.sid, r);
+  saveRec(r);
+  return r.sid;
 }
 async function saveRec(r) {
   r.updatedAt = Date.now();
@@ -421,9 +403,8 @@ function retryAll() {
 
 /* ---------- thao tác trên bài ---------- */
 async function addFiles(files, sid, replacePid) {
-  const st = studentBySid(sid);
-  if (!st || !files.length) return;
-  const r = ensureRec(st);
+  const r = S.recs.get(sid);
+  if (!r || !files.length) return;
   busy(files.length > 1 ? 'Đang xử lý ' + files.length + ' ảnh…' : 'Đang xử lý ảnh…');
   try {
     let first = true;
@@ -474,154 +455,24 @@ async function backToList() {
   S.screen = 'list'; S.sid = null; saveView(); render();
   pump();
 }
-function nextSid(cur) {
-  const all = classView().all;
-  const i = all.findIndex(s => s.sid === cur);
-  const free = s => { const r = S.recs.get(s.sid); return !r || !r.pages.length; };
-  for (let j = i + 1; j < all.length; j++) if (free(all[j])) return all[j].sid;
-  for (let j = 0; j < i; j++) if (free(all[j])) return all[j].sid;
-  return null;
+// Mở camera ngay trong lúc bấm nút (trình duyệt chỉ cho mở khi người dùng vừa bấm).
+function openCam(sid, replace) { S.pick = { sid, replace: replace || null }; const i = $('#inCam'); i.value = ''; i.click(); }
+function startPaper() {
+  if (!cfg.bai.trim()) { toast('Thầy gõ tên bài kiểm tra trước nhé.'); const el = $('#inBai'); if (el) el.focus(); return; }
+  if (!curLop()) { toast('Thầy gõ lớp hoặc phòng trước nhé.'); const el = $('#inLop'); if (el) el.focus(); return; }
+  const sid = newPaper(curKy(), curLop());
+  openCam(sid);
+  openStudent(sid);
 }
-async function goNext() {
-  const nx = nextSid(S.sid);
-  if (nx) await openStudent(nx);
-  else { await backToList(); toast('Cả lớp đã có ảnh. Thầy xem lại danh sách nhé.'); }
-}
-function newExtra(ten) {
-  const ky = cfg.ky, lop = cfg.lop;
-  const ns = [...S.recs.values()].filter(r => r.ky === ky && r.lop === lop && r.kind === 'T').map(r => r.n);
-  const n = (ns.length ? Math.max(...ns) : 0) + 1;
-  const st = { sid: sidOf(ky, lop, 'T', String(n)), kind: 'T', n, ten: ten || '', ky, lop };
-  const r = ensureRec(st); r.ten = ten || '';
-  saveRec(r);
-  return st.sid;
+function goNext() {
+  const cur = S.recs.get(S.sid);
+  if (!cur) { backToList(); return; }
+  if (!cur.pages.length) { openCam(cur.sid); return; }   // bài này chưa có trang nào: chụp tiếp cho bài này
+  const sid = newPaper(cur.ky, cur.lop);
+  openCam(sid);
+  openStudent(sid);
 }
 function saveView() { try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ screen: S.screen, sid: S.sid })); } catch (e) {} }
-
-/* ---------- đọc danh sách lớp (Excel, CSV, dán) ---------- */
-function readZip(buf) {
-  const u8 = new Uint8Array(buf), dv = new DataView(buf);
-  let eocd = -1;
-  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65558); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-  if (eocd < 0) throw new Error('File không phải dạng .xlsx');
-  const count = dv.getUint16(eocd + 10, true);
-  let p = dv.getUint32(eocd + 16, true);
-  const files = {};
-  for (let k = 0; k < count && dv.getUint32(p, true) === 0x02014b50; k++) {
-    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
-    const nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
-    files[new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nlen))] = { method, csize, lho };
-    p += 46 + nlen + elen + clen;
-  }
-  return {
-    async text(name) {
-      const f = files[name]; if (!f) return null;
-      const start = f.lho + 30 + dv.getUint16(f.lho + 26, true) + dv.getUint16(f.lho + 28, true);
-      const data = u8.subarray(start, start + f.csize);
-      if (f.method === 0) return new TextDecoder().decode(data);
-      if (f.method !== 8 || !window.DecompressionStream) throw new Error('Máy không giải nén được file Excel. Thầy dán danh sách thay cho file.');
-      const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
-      return new TextDecoder().decode(out);
-    }
-  };
-}
-const xml = t => new DOMParser().parseFromString(t, 'application/xml');
-const tags = (el, n) => el.getElementsByTagNameNS('*', n);
-const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-function colIndex(ref) { let n = 0; for (const ch of ref.replace(/[^A-Z]/gi, '').toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; }
-async function readXlsx(buf) {
-  const z = readZip(buf);
-  const wbT = await z.text('xl/workbook.xml');
-  if (!wbT) throw new Error('File Excel không đọc được');
-  const wb = xml(wbT), rel = xml((await z.text('xl/_rels/workbook.xml.rels')) || '<r/>');
-  const target = {};
-  for (const x of tags(rel, 'Relationship')) target[x.getAttribute('Id')] = x.getAttribute('Target');
-  const ss = [];
-  const ssT = await z.text('xl/sharedStrings.xml');
-  if (ssT) for (const si of tags(xml(ssT), 'si')) { let t = ''; for (const x of tags(si, 't')) t += x.textContent; ss.push(t); }
-  const sheets = [];
-  for (const sh of tags(wb, 'sheet')) {
-    let tg = target[sh.getAttributeNS(REL_NS, 'id') || sh.getAttribute('r:id')] || '';
-    if (!tg) continue;
-    tg = tg.replace(/^\//, ''); if (!tg.startsWith('xl/')) tg = 'xl/' + tg;
-    const t = await z.text(tg); if (!t) continue;
-    const rows = [];
-    for (const row of tags(xml(t), 'row')) {
-      const ri = (parseInt(row.getAttribute('r'), 10) || rows.length + 1) - 1;
-      const arr = [];
-      for (const c of tags(row, 'c')) {
-        const ty = c.getAttribute('t'); let v = '';
-        if (ty === 's') { const e = tags(c, 'v')[0]; v = e ? (ss[+e.textContent] || '') : ''; }
-        else if (ty === 'inlineStr') { for (const e of tags(c, 't')) v += e.textContent; }
-        else { const e = tags(c, 'v')[0]; v = e ? e.textContent : ''; }
-        const ci = colIndex(c.getAttribute('r') || '');
-        arr[ci >= 0 ? ci : arr.length] = v;
-      }
-      rows[ri] = arr;
-    }
-    for (let i = 0; i < rows.length; i++) { rows[i] = rows[i] || []; for (let j = 0; j < rows[i].length; j++) if (rows[i][j] == null) rows[i][j] = ''; }
-    sheets.push({ name: sh.getAttribute('name') || '', rows });
-  }
-  return sheets;
-}
-const HEAD_RE = /^ho (va |& )?ten( hoc sinh| hs)?$|^hoten$/;
-function namesFromRows(rows) {
-  let hr = -1, cName = -1, cHo = -1, cTen = -1;
-  for (let i = 0; i < Math.min(rows.length, 60) && hr < 0; i++) {
-    const r = (rows[i] || []).map(norm);
-    const j = r.findIndex(v => HEAD_RE.test(v));
-    if (j >= 0) { hr = i; cName = j; break; }
-    const jh = r.findIndex(v => v === 'ho' || v === 'ho dem' || v === 'ho lot' || v === 'ho va ten dem');
-    const jt = r.findIndex(v => v === 'ten');
-    if (jh >= 0 && jt >= 0) { hr = i; cHo = jh; cTen = jt; }
-  }
-  const out = [];
-  if (hr < 0) {
-    for (const row of rows) {
-      const cells = (row || []).map(c => String(c == null ? '' : c).trim()).filter(Boolean);
-      if (!cells.length) continue;
-      let nm = cells.find(c => /\p{L}/u.test(c) && !/\d/.test(c) && /\s/.test(c)) || cells.find(c => /\p{L}/u.test(c) && !/\d/.test(c));
-      if (!nm && cells.length === 1) { const m = cells[0].replace(/^\d+\s*[.)\-:]?\s*/, ''); if (/\p{L}/u.test(m) && !/\d/.test(m)) nm = m; }
-      if (!nm) continue;
-      nm = nm.replace(/\s+/g, ' ');
-      if (/^(stt|tt|ho|ten|ho va ten|ho ten|danh sach.*|lop.*)$/.test(norm(nm))) continue;
-      out.push(nm);
-    }
-    return out;
-  }
-  let blank = 0;
-  for (let i = hr + 1; i < rows.length; i++) {
-    const row = rows[i] || [];
-    let nm = cName >= 0 ? String(row[cName] || '') : String(row[cHo] || '') + ' ' + String(row[cTen] || '');
-    nm = nm.replace(/\s+/g, ' ').trim();
-    if (!nm || !/\p{L}/u.test(nm) || /\d/.test(nm)) { if (out.length && !/\p{L}/u.test(nm) && ++blank >= 3) break; continue; }
-    blank = 0; out.push(nm);
-  }
-  return out;
-}
-function guessLop(sheetName, rows) {
-  const m = String(sheetName).match(/(\d{1,2})\s*[_\/.\- ]\s*(\d{1,2})/);
-  if (m) return m[1] + '/' + m[2];
-  for (const r of (rows || []).slice(0, 10)) for (const c of r || []) {
-    const k = norm(c).match(/lop\s*:?\s*(\d{1,2})\s*[\/._\-]\s*(\d{1,2})/);
-    if (k) return k[1] + '/' + k[2];
-  }
-  return '';
-}
-function rowsFromText(t) { return String(t).split(/\r?\n/).map(l => l.split(/\t|;/)); }
-async function importListFile(file) {
-  busy('Đang đọc danh sách…');
-  try {
-    let sheets;
-    if (/\.(csv|txt)$/i.test(file.name)) sheets = [{ name: file.name.replace(/\.\w+$/, ''), rows: rowsFromText(await file.text()).map(r => r.length === 1 ? r[0].split(',') : r) }];
-    else if (/\.xls$/i.test(file.name)) throw new Error('File .xls kiểu cũ: thầy mở bằng Excel rồi lưu lại dạng .xlsx.');
-    else sheets = await readXlsx(await file.arrayBuffer());
-    const found = sheets.map(s => ({ lop: guessLop(s.name, s.rows), names: namesFromRows(s.rows) })).filter(s => s.names.length);
-    if (!found.length) throw new Error('Không thấy cột "Họ và tên" hay tên học sinh trong file.');
-    busy();
-    showImportConfirm(found);
-  } catch (e) { busy(); toast(e.message || String(e)); }
-}
 
 /* ---------- giao diện ---------- */
 function toast(msg, ms) {
@@ -660,74 +511,59 @@ function syncPill() {
   else h = '<span class="pill ok" data-act="queue">Đã lưu hết ✓</span>';
   el.innerHTML = h;
 }
-function classNames() {
-  const set = new Set(Object.keys(cfg.lops));
-  for (const r of S.recs.values()) if (r.ky === cfg.ky) set.add(r.lop);
-  if (cfg.lop) set.add(cfg.lop);
-  return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
-}
+const uniq = a => [...new Set(a.map(x => String(x || '').trim()).filter(Boolean))];
+function remember(list, v) { return uniq([v].concat(list || [])).slice(0, 10); }
 function render() {
   syncPill();
   const main = $('#main'), foot = $('#foot'), footIn = $('#footIn');
   $('#btnBack').hidden = S.screen !== 'hs';
-  if (S.screen === 'hs' && S.sid && studentBySid(S.sid)) return renderStudent(main, foot, footIn);
+  if (S.screen === 'hs' && S.sid && S.recs.get(S.sid)) return renderPaper(main, foot, footIn);
   S.screen = 'list'; S.sid = null;
   $('#title').textContent = 'Chụp bài → Drive';
   foot.hidden = true;
-  const cls = classNames();
-  const v = classView();
   let h = '';
   if (!cfg.api || !cfg.key) {
     h += '<div class="card"><h2>Chưa kết nối Google Drive</h2><p class="muted small" style="margin:0 0 10px">Làm một lần trên máy tính: mở Cài đặt, bấm “Chép mã máy chủ”, dán vào script.google.com và triển khai theo hướng dẫn. Điện thoại thì quét mã QR trong Cài đặt của máy tính là xong.</p>' +
          '<div class="row"><button class="btn pri" data-act="settings">Mở Cài đặt</button><a class="btn" href="' + REPO + '#readme" target="_blank" rel="noopener">Xem hướng dẫn</a></div></div>';
   }
-  h += '<div class="card"><div class="grid2">' +
-       '<div><label class="f" for="inKy">Kỳ kiểm tra</label><input class="inp" id="inKy" list="kys" value="' + esc(cfg.ky) + '" placeholder="VD: GK1" autocomplete="off"><datalist id="kys">' + (cfg.kys || []).map(k => '<option value="' + esc(k) + '">').join('') + '</datalist></div>' +
-       '<div><label class="f" for="selLop">Lớp</label><select class="inp" id="selLop">' +
-       (cls.length ? '' : '<option value="">Chưa có lớp</option>') +
-       cls.map(c => '<option value="' + esc(c) + '"' + (c === cfg.lop ? ' selected' : '') + '>' + esc(c) + '</option>').join('') +
-       '<option value="__new">＋ Thêm lớp…</option></select></div></div></div>';
-  if (cfg.lop) {
-    const fd = cfg.folders[cfg.ky + '|' + cfg.lop];
-    const withPages = v.all.filter(s => { const r = S.recs.get(s.sid); return r && r.pages.length; });
-    const saved = withPages.filter(s => S.recs.get(s.sid).status === 'xong').length;
-    const total = v.list.length || withPages.length;
-    h += '<div class="card"><div class="row"><div class="grow"><b>Đã lưu ' + saved + '/' + total + ' bài</b>' +
-         (withPages.length - saved ? ' <span class="muted small">· ' + (withPages.length - saved) + ' bài chưa lưu xong</span>' : '') + '</div></div>' +
-         '<div class="bar"><i style="width:' + (total ? Math.round(saved * 100 / total) : 0) + '%"></i></div>' +
-         (fd ? '<div class="row" style="margin-top:12px"><span class="grow small muted">Thư mục Drive: ' + esc(cfg.ky) + ' / Lớp ' + esc(cfg.lop.replace(/\//g, '-')) + '</span>' +
-               '<a class="btn sm" href="' + esc(fd.url) + '" target="_blank" rel="noopener">Mở</a><button class="btn sm pri" data-act="copyFolder">Chép link</button></div>' +
-               '<p class="hint" style="margin:8px 0 0">Chụp xong cả lớp, thầy gửi link thư mục này cho Claude để chấm.</p>' : '') +
+  const goiYBai = uniq((cfg.bais || []).concat(['Giữa kì', 'Cuối kì', '15 phút']));
+  const goiYLop = uniq((cfg.lopGanDay || []).concat([...S.recs.values()].map(r => r.lop)));
+  h += '<div class="card">' +
+       '<label class="f">Học kì</label><div class="seg">' +
+       ['1', '2'].map(v => '<button class="btn' + (cfg.hk === v ? ' pri' : '') + '" data-act="hk" data-v="' + v + '" aria-pressed="' + (cfg.hk === v) + '">Học kì ' + v + '</button>').join('') + '</div>' +
+       '<label class="f" for="inBai" style="margin-top:12px">Bài kiểm tra</label>' +
+       '<input class="inp" id="inBai" list="dsBai" value="' + esc(cfg.bai) + '" placeholder="VD: Giữa kì Toán 6" autocomplete="off">' +
+       '<datalist id="dsBai">' + goiYBai.map(k => '<option value="' + esc(k) + '">').join('') + '</datalist>' +
+       '<label class="f" for="inLop" style="margin-top:12px">Lớp hoặc phòng</label>' +
+       '<input class="inp" id="inLop" list="dsLop" value="' + esc(cfg.lop) + '" placeholder="VD: 6/7 hoặc Phòng 12" autocomplete="off">' +
+       '<datalist id="dsLop">' + goiYLop.map(k => '<option value="' + esc(k) + '">').join('') + '</datalist>' +
+       '</div>';
+  h += '<button class="btn pri big" data-act="newPaper">📷 Chụp bài mới</button>';
+  const ky = curKy(), lop = curLop();
+  if (cfg.bai.trim() && lop) {
+    const list = papers(ky, lop).filter(r => r.pages.length);
+    const saved = list.filter(r => r.status === 'xong').length;
+    const fd = cfg.folders[ky + '|' + lop];
+    h += '<div class="card" style="margin-top:14px"><div class="row"><div class="grow"><b>' + esc(folderLabel(ky, lop)) + '</b><br>' +
+         '<span class="small">' + (list.length ? 'Đã lưu ' + saved + '/' + list.length + ' bài lên Drive' : 'Chưa chụp bài nào.') + '</span>' +
+         (list.length - saved ? ' <span class="muted small">· ' + (list.length - saved) + ' bài đang chờ</span>' : '') + '</div></div>' +
+         (fd ? '<div class="row" style="margin-top:10px"><a class="btn sm" href="' + esc(fd.url) + '" target="_blank" rel="noopener">Mở thư mục</a><button class="btn sm pri" data-act="copyFolder">Chép link thư mục</button></div>' +
+               '<p class="hint" style="margin:8px 0 0">Chụp xong, thầy gửi link thư mục này cho Claude để chấm.</p>' : '') +
          '</div>';
-    if (v.list.length) {
-      h += '<input class="inp" id="inQ" type="search" placeholder="Tìm tên hoặc số thứ tự…" value="' + esc(S.q) + '" style="margin:0 0 10px" autocomplete="off">';
-      const q = norm(S.q);
-      const shown = v.list.filter(s => !q || norm(s.ten).includes(q) || String(s.stt) === q || pad2(s.stt) === q);
-      h += '<div class="list">' + (shown.length ? shown.map(rowHtml).join('') : '<div class="empty">Không có tên nào khớp.</div>') + '</div>';
-    } else {
-      h += '<div class="card"><h2>Lớp ' + esc(cfg.lop) + ' chưa có danh sách</h2><p class="muted small" style="margin:0 0 10px">Có danh sách thì file trên Drive mang tên từng em. Không có vẫn chụp được, file sẽ là "Thêm 01", "Thêm 02"…</p>' +
-           '<div class="row"><button class="btn" data-act="importFile">Nhập từ file Excel</button><button class="btn" data-act="pasteList">Dán danh sách</button></div></div>';
-    }
-    if (v.others.length) h += '<h2 style="font-size:15px;margin:14px 2px 8px">Bài thêm</h2><div class="list">' + v.others.map(rowHtml).join('') + '</div>';
-    h += '<button class="btn wide" data-act="newExtra">＋ Bài không có trong danh sách</button>';
-  } else if (!cls.length) {
-    h += '<div class="card"><h2>Bắt đầu</h2><p class="muted small" style="margin:0 0 10px">Thêm lớp và danh sách học sinh. Thầy có thể chọn thẳng file Excel danh sách lớp (có cột "Họ và tên").</p>' +
-         '<div class="row"><button class="btn pri" data-act="importFile">Nhập từ file Excel</button><button class="btn" data-act="pasteList">Dán danh sách</button><button class="btn" data-act="newClassEmpty">Lớp không có danh sách</button></div></div>';
+    if (list.length) h += '<div class="list">' + list.map(rowHtml).join('') + '</div>';
   }
-  h += '<p class="hint" style="text-align:center;margin-top:18px">Ảnh và danh sách lớp chỉ lưu trên máy này và trong Drive của thầy.</p>';
+  h += '<p class="hint" style="text-align:center;margin-top:18px">Ảnh chỉ lưu tạm trên máy này cho tới khi lên Drive của thầy.</p>';
   main.innerHTML = h;
 }
-function rowHtml(s) {
-  const r = S.recs.get(s.sid), st = recStatus(r);
-  const th = r && r.pages[0] ? '<img class="th" alt="" src="' + r.pages[0].thumb + '">' : '';
-  const no = s.kind === 'L' ? pad2(s.stt) : '+' + s.n;
-  const nm = s.kind === 'L' ? s.ten : (s.ten || 'Bài thêm ' + pad2(s.n));
-  return '<div class="st" data-act="open" data-sid="' + esc(s.sid) + '"><span class="no">' + no + '</span>' + th + '<span class="nm">' + esc(nm) + '</span><span class="tag ' + st.cls + '">' + st.text + '</span></div>';
+function rowHtml(r) {
+  const st = recStatus(r);
+  const th = r.pages[0] ? '<img class="th" alt="" src="' + r.pages[0].thumb + '">' : '';
+  return '<div class="st" data-act="open" data-sid="' + esc(r.sid) + '"><span class="no">' + pad2(r.n) + '</span>' + th + '<span class="nm">Bài ' + pad2(r.n) + '</span><span class="tag ' + st.cls + '">' + st.text + '</span></div>';
 }
-function renderStudent(main, foot, footIn) {
-  const st = studentBySid(S.sid), r = S.recs.get(S.sid);
-  $('#title').textContent = label(st);
-  const pages = r ? r.pages : [];
+function renderPaper(main, foot, footIn) {
+  const r = S.recs.get(S.sid);
+  $('#title').textContent = label(r);
+  const pages = r.pages;
   let h = '';
   if (pages.length) {
     const s = r.status;
@@ -736,13 +572,10 @@ function renderStudent(main, foot, footIn) {
     else if (s === 'dang') msg = 'Đang gộp và lưu lên Drive…';
     else if (s === 'loi') msg = '⚠ ' + esc(r.err) + ' <button class="btn sm" data-act="retryOne">Thử lại</button>';
     else if (s === 'cho') msg = 'Đang chờ gửi lên Drive.';
-    else msg = 'Chưa lưu. Chụp đủ các trang rồi bấm “Em tiếp theo” hoặc “Xong”, app sẽ gộp thành 1 file PDF và lưu lên Drive.';
+    else msg = 'Chưa lưu. Chụp đủ các trang rồi bấm “Bài tiếp theo” hoặc “Xong”, app sẽ gộp thành 1 file PDF và lưu lên Drive.';
     h += '<div class="status ' + (s === 'cho-xoa' ? 'cho' : s) + '">' + msg + '</div>';
   } else {
-    h += '<p class="hint">Chụp lần lượt từng trang của em này. Đặt bài trên mặt bàn, chụp thẳng từ trên xuống, đủ sáng, thấy đủ 4 góc giấy.</p>';
-  }
-  if (st.kind === 'T') {
-    h += '<div class="card"><label class="f" for="inTen">Tên học sinh (không bắt buộc)</label><input class="inp" id="inTen" value="' + esc(st.ten) + '" placeholder="Để trống nếu chưa biết" autocomplete="off"></div>';
+    h += '<p class="hint">Chụp lần lượt từng trang của bài này. Đặt bài trên mặt bàn, chụp thẳng từ trên xuống, đủ sáng, thấy đủ 4 góc giấy.</p>';
   }
   h += '<button class="btn pri big" data-act="cam">📷 Chụp trang ' + (pages.length + 1) + '</button>';
   h += '<div class="row" style="margin:10px 0 14px"><button class="btn grow" data-act="pick">Chọn ảnh có sẵn</button></div>';
@@ -757,7 +590,7 @@ function renderStudent(main, foot, footIn) {
   }
   h += '<p class="hint" style="margin-top:14px">Vừa chụp mà ảnh không hiện (máy yếu hay tải lại trang): thầy chụp lại trang đó.</p>';
   main.innerHTML = h;
-  footIn.innerHTML = '<button class="btn" data-act="back">Xong, về danh sách</button><button class="btn pri" data-act="next">Em tiếp theo ›</button>';
+  footIn.innerHTML = '<button class="btn" data-act="back">Xong</button><button class="btn pri" data-act="next">Bài tiếp theo ›</button>';
   foot.hidden = false;
 }
 
@@ -785,7 +618,6 @@ function confirmBox(title, text, okText, danger) {
   });
 }
 function showSettings() {
-  const cls = Object.keys(cfg.lops).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
   const m = openModal(
     '<h3>Cài đặt</h3>' +
     '<div class="sec"><b>Kết nối Google Drive</b>' +
@@ -794,9 +626,6 @@ function showSettings() {
     '<label class="f" for="sKey" style="margin-top:10px">Mã bí mật</label><input class="inp" id="sKey" value="' + esc(cfg.key) + '" autocomplete="off" autocapitalize="off" spellcheck="false">' +
     '<div class="acts"><button class="btn pri" id="sTest">Lưu và kiểm tra</button><button class="btn" id="sQr">Mã QR cho điện thoại</button><button class="btn" id="sCode">Chép mã máy chủ</button></div>' +
     '<p class="small" id="sMsg" style="margin:10px 0 0"></p></div>' +
-    '<div class="sec"><b>Danh sách lớp</b>' +
-    (cls.length ? cls.map(c => '<div class="cls"><span class="grow">Lớp ' + esc(c) + ' <span class="muted small">· ' + cfg.lops[c].length + ' em</span></span><button class="btn sm" data-edit="' + esc(c) + '">Sửa</button><button class="btn sm danger" data-del="' + esc(c) + '">Xoá</button></div>').join('') : '<p class="muted small">Chưa có lớp nào.</p>') +
-    '<div class="acts"><button class="btn" id="sImp">Nhập từ file Excel</button><button class="btn" id="sPaste">Dán danh sách</button></div></div>' +
     '<div class="sec"><b>Ảnh chụp</b><label class="f" for="sSide" style="margin-top:10px">Độ nét khi lưu</label><select class="inp" id="sSide">' +
     [[2000, 'Vừa (2000 px), file nhẹ'], [2600, 'Cao (2600 px), nên dùng'], [3200, 'Rất cao (3200 px), file nặng']].map(o => '<option value="' + o[0] + '"' + (+cfg.maxSide === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') +
     '</select></div>' +
@@ -842,25 +671,16 @@ function showSettings() {
     });
   };
   m.querySelector('#sQr').onclick = () => { saveConn(); showQr(); };
-  m.querySelector('#sImp').onclick = () => { closeModal(); pickListFile(); };
-  m.querySelector('#sPaste').onclick = () => { closeModal(); showPaste(''); };
   m.querySelector('#sClose').onclick = () => { saveConn(); closeModal(); pump(); };
   m.querySelector('#sSide').onchange = e => { cfg.maxSide = +e.target.value; saveCfg(); };
-  m.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => { const c = b.getAttribute('data-edit'); closeModal(); showPaste(c); });
-  m.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-    const c = b.getAttribute('data-del');
-    closeModal();
-    if (await confirmBox('Xoá danh sách lớp ' + c + '?', 'Chỉ xoá danh sách tên trên máy này. Ảnh và file đã lưu trên Drive vẫn còn.', 'Xoá', true)) {
-      delete cfg.lops[c]; if (cfg.lop === c) cfg.lop = Object.keys(cfg.lops)[0] || ''; saveCfg(); render();
-    }
-  });
   m.querySelector('#sClean').onclick = async () => {
     closeModal();
     const done = [...S.recs.values()].filter(r => r.status === 'xong' && r.pages.length);
     if (!done.length) { toast('Chưa có bài nào lưu xong để dọn.'); return; }
-    if (!(await confirmBox('Dọn ảnh của ' + done.length + ' bài đã lưu?', 'File PDF trên Drive vẫn còn. Sau khi dọn, muốn chụp lại một trang của em nào thì phải chụp lại cả bài của em đó.', 'Dọn'))) return;
+    if (!(await confirmBox('Dọn ảnh của ' + done.length + ' bài đã lưu?', 'File PDF trên Drive vẫn còn. Sau khi dọn, muốn chụp lại một trang của bài nào thì phải chụp lại cả bài đó.', 'Dọn'))) return;
     for (const r of done) { for (const p of r.pages) await DB.delImg(p.pid).catch(() => {}); r.cleaned = true; await saveRec(r); }
     toast('Đã dọn ảnh của ' + done.length + ' bài.');
+    render();
   };
   storageInfo().then(t => { const el = m.querySelector('#sStore'); if (el) el.textContent = t; });
 }
@@ -929,66 +749,9 @@ function showCode(code, key) {
   m.querySelector('#cSel').onclick = () => { ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); };
   m.querySelector('#cClose').onclick = () => closeModal();
 }
-function showPaste(lop) {
-  const names = lop ? (cfg.lops[lop] || []) : [];
-  const m = openModal('<h3>' + (lop ? 'Sửa danh sách lớp ' + esc(lop) : 'Dán danh sách lớp') + '</h3>' +
-    '<label class="f" for="pLop">Tên lớp</label><input class="inp" id="pLop" value="' + esc(lop || cfg.lop || '') + '" placeholder="VD: 6/7" autocomplete="off">' +
-    '<label class="f" for="pNames" style="margin-top:10px">Họ tên học sinh, mỗi dòng một em (dán thẳng từ Excel cũng được)</label>' +
-    '<textarea class="inp" id="pNames" placeholder="Nguyễn Văn An&#10;Trần Thị Bình&#10;…">' + esc(names.join('\n')) + '</textarea>' +
-    '<p class="small muted" id="pCount" style="margin:6px 0 0"></p>' +
-    '<div class="acts"><button class="btn" id="pCancel">Thôi</button><button class="btn pri" id="pSave">Lưu</button></div>');
-  const ta = m.querySelector('#pNames'), cnt = m.querySelector('#pCount');
-  const count = () => { const n = namesFromRows(rowsFromText(ta.value)); cnt.textContent = n.length ? 'Nhận được ' + n.length + ' tên. Thứ tự trong danh sách là số thứ tự trên file.' : ''; };
-  ta.oninput = count; count();
-  m.querySelector('#pCancel').onclick = () => closeModal();
-  m.querySelector('#pSave').onclick = () => {
-    const nl = m.querySelector('#pLop').value.trim().replace(/\s+/g, ' ');
-    const list = namesFromRows(rowsFromText(ta.value));
-    if (!nl) { toast('Thầy nhập tên lớp nhé.'); return; }
-    if (lop && lop !== nl) delete cfg.lops[lop];
-    cfg.lops[nl] = list; cfg.lop = nl; saveCfg(); closeModal(); render();
-    toast('Đã lưu lớp ' + nl + (list.length ? ' (' + list.length + ' em)' : '') + '.');
-  };
-}
-function showImportConfirm(found) {
-  const m = openModal('<h3>Nhập danh sách lớp</h3><p class="muted small" style="margin:0 0 10px">Thầy kiểm tra tên lớp. Danh sách giữ đúng thứ tự trong file.</p>' +
-    found.map((f, i) => '<div class="cls"><span class="grow small">' + f.names.length + ' em: ' + esc(f.names.slice(0, 2).join(', ')) + '…</span><input class="inp" style="width:110px" data-i="' + i + '" value="' + esc(f.lop) + '" placeholder="Tên lớp"></div>').join('') +
-    '<div class="acts"><button class="btn" id="iCancel">Thôi</button><button class="btn pri" id="iSave">Lưu</button></div>');
-  m.querySelector('#iCancel').onclick = () => closeModal();
-  m.querySelector('#iSave').onclick = () => {
-    let last = '';
-    for (const inp of m.querySelectorAll('input[data-i]')) {
-      const lop = inp.value.trim(); if (!lop) { toast('Thầy điền tên lớp cho từng danh sách.'); return; }
-      cfg.lops[lop] = found[+inp.dataset.i].names; last = lop;
-    }
-    cfg.lop = last; saveCfg(); closeModal(); render();
-    toast('Đã nhập ' + found.length + ' lớp.');
-  };
-}
-function showNewClass() {
-  const m = openModal('<h3>Thêm lớp</h3><div class="acts" style="margin-top:0;flex-direction:column">' +
-    '<button class="btn wide pri" id="nImp">Nhập từ file Excel danh sách lớp</button>' +
-    '<button class="btn wide" id="nPaste">Dán danh sách tên</button>' +
-    '<button class="btn wide" id="nEmpty">Lớp không có danh sách</button>' +
-    '<button class="btn wide" id="nCancel">Thôi</button></div>', () => render());
-  m.querySelector('#nImp').onclick = () => { S.modal.onClose = null; closeModal(); pickListFile(); };
-  m.querySelector('#nPaste').onclick = () => { S.modal.onClose = null; closeModal(); showPaste(''); };
-  m.querySelector('#nEmpty').onclick = () => { S.modal.onClose = null; closeModal(); newClassEmpty(); };
-  m.querySelector('#nCancel').onclick = () => closeModal();
-}
-function newClassEmpty() {
-  const m = openModal('<h3>Lớp không có danh sách</h3><label class="f" for="eLop">Tên lớp</label><input class="inp" id="eLop" placeholder="VD: 6/7" autocomplete="off">' +
-    '<div class="acts"><button class="btn" id="eCancel">Thôi</button><button class="btn pri" id="eSave">Tạo</button></div>', () => render());
-  m.querySelector('#eCancel').onclick = () => closeModal();
-  m.querySelector('#eSave').onclick = () => {
-    const l = m.querySelector('#eLop').value.trim(); if (!l) return;
-    cfg.lops[l] = cfg.lops[l] || []; cfg.lop = l; saveCfg(); closeModal();
-  };
-  setTimeout(() => m.querySelector('#eLop').focus(), 50);
-}
 function showQueue() {
   const items = [...S.recs.values()].filter(r => r.status !== 'xong' && (r.pages.length || r.fileName));
-  const name = r => r.kind === 'L' ? pad2(r.stt) + ' · ' + r.ten : 'Bài thêm ' + pad2(r.n) + (r.ten ? ' · ' + r.ten : '');
+  const name = r => 'Bài ' + pad2(r.n);
   const st = r => ({ nhap: 'chưa lưu (đang chụp)', cho: 'chờ gửi', 'cho-xoa': 'chờ xoá trên Drive', dang: 'đang gửi', loi: 'lỗi: ' + r.err }[r.status] || r.status);
   const m = openModal('<h3>Bài chưa lưu xong</h3>' +
     (items.length ? items.map(r => '<div class="qitem"><b>' + esc(name(r)) + '</b> <span class="muted small">· Lớp ' + esc(r.lop) + ' · ' + esc(r.ky) + '</span><br><span class="small">' + esc(st(r)) + '</span></div>').join('')
@@ -1011,61 +774,40 @@ async function showPreview(pid) {
 }
 
 /* ---------- sự kiện ---------- */
-function pickListFile() { $('#inList').value = ''; $('#inList').click(); }
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act, pid = el.dataset.pid;
   switch (act) {
     case 'settings': showSettings(); break;
     case 'queue': showQueue(); break;
+    case 'hk': cfg.hk = el.dataset.v === '2' ? '2' : '1'; saveCfg(); render(); break;
+    case 'newPaper': startPaper(); break;
     case 'open': openStudent(el.dataset.sid); break;
     case 'back': backToList(); break;
     case 'next': goNext(); break;
-    case 'cam': S.pick = { sid: S.sid, replace: null }; $('#inCam').value = ''; $('#inCam').click(); break;
+    case 'cam': openCam(S.sid); break;
     case 'pick': S.pick = { sid: S.sid, replace: null }; $('#inPick').value = ''; $('#inPick').click(); break;
-    case 'retake': S.pick = { sid: S.sid, replace: pid }; $('#inCam').value = ''; $('#inCam').click(); break;
-    case 'delPage': if (await confirmBox('Xoá trang này?', 'Ảnh trang này bị bỏ khỏi bài của em.', 'Xoá', true)) delPage(S.sid, pid); break;
+    case 'retake': openCam(S.sid, pid); break;
+    case 'delPage': if (await confirmBox('Xoá trang này?', 'Ảnh trang này bị bỏ khỏi bài.', 'Xoá', true)) delPage(S.sid, pid); break;
     case 'up': movePage(S.sid, pid, -1); break;
     case 'preview': showPreview(pid); break;
     case 'retryOne': { const r = S.recs.get(S.sid); if (r) { queue(r); await saveRec(r); pump(); render(); } break; }
-    case 'copyFolder': { const fd = cfg.folders[cfg.ky + '|' + cfg.lop]; if (fd) copyText(fd.url); break; }
-    case 'importFile': pickListFile(); break;
-    case 'pasteList': showPaste(cfg.lop && !(cfg.lops[cfg.lop] || []).length ? cfg.lop : ''); break;
-    case 'newClassEmpty': newClassEmpty(); break;
-    case 'newExtra': {
-      const sid = newExtra('');
-      openStudent(sid);
-      break;
-    }
+    case 'copyFolder': { const fd = cfg.folders[curKy() + '|' + curLop()]; if (fd) copyText(fd.url, 'Đã chép link thư mục.'); break; }
   }
 });
+const gon = v => String(v || '').replace(/\s+/g, ' ').trim();
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'inCam' || t.id === 'inPick') {
     const files = [...(t.files || [])]; const pk = S.pick; S.pick = null;
     if (files.length && pk && pk.sid) addFiles(files, pk.sid, pk.replace);
-  } else if (t.id === 'inList') {
-    const f = t.files && t.files[0]; if (f) importListFile(f);
-  } else if (t.id === 'selLop') {
-    if (t.value === '__new') { t.value = cfg.lop; showNewClass(); return; }
-    cfg.lop = t.value; S.q = ''; saveCfg(); render();
-  } else if (t.id === 'inKy') {
-    const v = t.value.trim().replace(/\s+/g, ' ');
-    if (!v) { t.value = cfg.ky; return; }
-    cfg.ky = v; cfg.kys = [v].concat((cfg.kys || []).filter(k => k !== v)).slice(0, 8); saveCfg(); render();
-  } else if (t.id === 'inTen') {
-    const r = S.recs.get(S.sid); const v = t.value.trim().replace(/\s+/g, ' ');
-    if (r) { if (r.ten !== v) { r.ten = v; if (r.pages.length) touch(r); saveRec(r); } }
-    else { const st = studentBySid(S.sid); if (st) { const rr = ensureRec(st); rr.ten = v; saveRec(rr); } }
-    $('#title').textContent = label(studentBySid(S.sid));
-  }
-});
-document.addEventListener('input', e => {
-  if (e.target.id === 'inQ') {
-    S.q = e.target.value;
-    const pos = e.target.selectionStart;
-    render();
-    const q = $('#inQ'); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch (er) {} }
+  } else if (t.id === 'inBai') {
+    const v = gon(t.value);
+    cfg.bai = v; if (v) cfg.bais = remember(cfg.bais, v); saveCfg(); render();
+  } else if (t.id === 'inLop') {
+    let v = gon(t.value);
+    if (/^lop\s/.test(norm(v))) v = v.replace(/^\S+\s+/, '');   // "Lớp 6/7" → "6/7", vì thư mục đã có chữ "Lớp"
+    cfg.lop = v; if (v) cfg.lopGanDay = remember(cfg.lopGanDay, v); saveCfg(); render();
   }
 });
 window.addEventListener('online', () => { syncPill(); pump(); });
@@ -1091,10 +833,10 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
       if (r.pages.length && r.rev !== r.sentRev) queue(r);
       else if (r.pages.length) r.status = 'xong';
     }
-    if (!r.pages.length && !r.fileName && r.status !== 'loi') { S.recs.delete(r.sid); DB.del(r.sid).catch(() => {}); }
+    const dangMo = view && view.screen === 'hs' && view.sid === r.sid;   // bài đang mở trước khi tải lại: giữ để quay lại đúng bài
+    if (!r.pages.length && !r.fileName && r.status !== 'loi' && !dangMo) { S.recs.delete(r.sid); DB.del(r.sid).catch(() => {}); }
   }
-  if (!cfg.lop) cfg.lop = classNames()[0] || '';
-  if (view && view.screen === 'hs' && view.sid && studentBySid(view.sid)) { S.screen = 'hs'; S.sid = view.sid; }
+  if (view && view.screen === 'hs' && view.sid && S.recs.get(view.sid)) { S.screen = 'hs'; S.sid = view.sid; }
   render();
   pump();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

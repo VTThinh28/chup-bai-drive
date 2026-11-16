@@ -3,7 +3,7 @@
  * App: https://vtthinh28.github.io/chup-bai-drive/
  * Hướng dẫn cài đặt: https://github.com/VTThinh28/chup-bai-drive#readme
  *
- * Bài được lưu theo cây thư mục:  <thư mục gốc> / <kỳ kiểm tra> / Lớp <lớp> / <STT> - <Họ tên>.pdf
+ * Bài được lưu theo cây thư mục:  <thư mục gốc> / <HK - tên bài kiểm tra> / Lớp <lớp hoặc phòng> / Bài 01.pdf
  */
 
 // (1) MÃ BÍ MẬT: đổi thành chuỗi riêng của thầy cô (ít nhất 6 kí tự). Nhập đúng mã này vào app.
