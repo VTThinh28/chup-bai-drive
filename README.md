@@ -48,6 +48,7 @@ Mẹo chụp: đặt bài trên mặt bàn, chụp thẳng từ trên xuống, �
 | Trạng thái | Nghĩa |
 |---|---|
 | chưa lưu | Đang chụp bài này, chưa gửi |
+| đang xử lý ảnh | App đang thu nhỏ ảnh vừa chụp. Thầy cứ chụp tiếp, không cần chờ |
 | chờ gửi, đang lưu | App đang gửi lên Drive |
 | đã lưu ✓ | File PDF đã nằm trên Drive |
 | lỗi | Bấm nút trạng thái trên cùng → **Thử lại tất cả**. Lỗi mạng thì app tự thử lại |

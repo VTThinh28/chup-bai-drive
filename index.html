@@ -78,6 +78,7 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 .pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:0 0 12px}
 .pg{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .pg img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:var(--line);cursor:zoom-in}
+.pg .wait{aspect-ratio:3/4;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;background:var(--line);font-size:13px;color:var(--muted)}
 .pg .cap{display:flex;justify-content:space-between;align-items:center;min-height:44px;padding:4px 8px 0;font-weight:600;font-size:14px}
 .pg .acts{display:flex;gap:6px;padding:4px 8px 8px}
 .pg .acts .btn{flex:1}
@@ -106,9 +107,6 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 .prev img{display:block;width:100%;height:auto;border-radius:10px;background:var(--line)}
 .toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1e2533;color:#fff;padding:10px 14px;border-radius:12px;font-size:15px;z-index:80;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s}
 .toast.on{opacity:1}
-.busy{position:fixed;inset:0;z-index:70;background:rgba(10,16,28,.35);display:none;align-items:center;justify-content:center}
-.busy.on{display:flex}
-.busy div{background:var(--card);color:var(--text);padding:14px 18px;border-radius:14px;display:flex;gap:10px;align-items:center}
 .spin{width:20px;height:20px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--pri);animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 .qitem{padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
@@ -128,7 +126,6 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
 <main class="wrap" id="main"></main>
 <div class="foot" id="foot" hidden><div class="foot-in" id="footIn"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<div class="busy" id="busy"><div><span class="spin"></span><span id="busyText">Đang xử lý ảnh…</span></div></div>
 <input type="file" id="inCam" class="sr" accept="image/*" capture="environment">
 <input type="file" id="inPick" class="sr" accept="image/*" multiple>
 
@@ -139,7 +136,7 @@ textarea.inp{min-height:160px;resize:vertical;font-size:15px}
    gửi lên Google Drive qua một Apps Script của chính thầy cô.
    Thư mục trên Drive: HK1 - <tên bài kiểm tra> / Lớp <lớp hoặc phòng>.
    Ảnh tạm và cài đặt chỉ lưu trên máy này. */
-const VERSION = '1.1';
+const VERSION = '1.2';
 const REPO = 'https://github.com/VTThinh28/chup-bai-drive';
 const CFG_KEY = 'chupbai.cfg.v1';
 const VIEW_KEY = 'chupbai.view.v1';
@@ -197,7 +194,7 @@ const DB = (() => {
 })();
 
 /* ---------- trạng thái ---------- */
-const S = { recs: new Map(), screen: 'list', sid: null, pumping: false, timer: 0, pick: null, modal: null };
+const S = { recs: new Map(), screen: 'list', sid: null, pumping: false, timer: 0, pick: null, modal: null, work: [], working: false };
 
 /* ---------- bài làm: mỗi bài là một file PDF "Bài 01.pdf" ---------- */
 // ky = "HK1 - <tên bài kiểm tra>" (thư mục cấp 1), lop = lớp hoặc phòng (thư mục "Lớp …" bên trong).
@@ -227,10 +224,16 @@ function touch(r) { r.rev++; r.err = ''; r.tries = 0; r.retryAt = 0; if (r.statu
 function queue(r) { if (r.status !== 'dang') { r.status = r.pages.length ? 'cho' : 'cho-xoa'; r.queuedAt = Date.now(); r.err = ''; r.tries = 0; r.retryAt = 0; } }
 
 /* ---------- xử lý ảnh ---------- */
+function b64ToBuf(b64) {
+  const s = atob(b64), u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u.buffer;
+}
 function loadImg(url) {
   return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Ảnh hỏng hoặc định dạng lạ')); im.src = url; });
 }
-async function processImage(file, maxSide) {
+// Cách cũ, làm ngay trên màn hình (máy nào cũng chạy được, nhưng màn hình đứng lúc xử lý).
+async function processImageCu(file, maxSide) {
   const url = URL.createObjectURL(file);
   let src = null, w = 0, h = 0;
   try {
@@ -242,17 +245,92 @@ async function processImage(file, maxSide) {
     const c = document.createElement('canvas'); c.width = cw; c.height = ch;
     const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
     g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch); g.drawImage(src, 0, 0, cw, ch);
-    const blob = await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('Máy không nén được ảnh')), 'image/jpeg', QUALITY));
+    // toDataURL nén ngay. toBlob của Chrome hay chờ lúc máy rảnh mới nén, chậm thêm có khi cả giây.
+    const jpg = c.toDataURL('image/jpeg', QUALITY);
+    if (jpg.indexOf('data:image/jpeg') !== 0) throw new Error('Máy không nén được ảnh');
+    const buf = b64ToBuf(jpg.slice(jpg.indexOf(',') + 1));
     const ts = 240 / Math.max(cw, ch);
     const t = document.createElement('canvas'); t.width = Math.max(1, Math.round(cw * ts)); t.height = Math.max(1, Math.round(ch * ts));
     const tg = t.getContext('2d'); tg.imageSmoothingQuality = 'high'; tg.drawImage(c, 0, 0, t.width, t.height);
     const thumb = t.toDataURL('image/jpeg', 0.7);
     c.width = c.height = 1; t.width = t.height = 1;
-    return { buf: await blob.arrayBuffer(), w: cw, h: ch, thumb };
+    return { buf, w: cw, h: ch, thumb };
   } finally {
     URL.revokeObjectURL(url);
     if (src) src.src = '';
   }
+}
+
+/* Xử lý ảnh ở luồng riêng (Web Worker): giải mã, thu nhỏ, nén JPEG. Màn hình không bị đứng, thầy bấm chụp tiếp được ngay. */
+const WORKER_CODE = `
+onmessage = async e => {
+  const d = e.data;
+  try {
+    const bm = await createImageBitmap(d.file);
+    if (d.test) {   // ảnh mẫu: xoay đúng thì 32×64, nửa trên đỏ, nửa dưới xanh
+      const c = new OffscreenCanvas(bm.width, bm.height), g = c.getContext('2d'); g.drawImage(bm, 0, 0);
+      const ok = bm.width === 32 && bm.height === 64;
+      const a = g.getImageData(16, 12, 1, 1).data, b = g.getImageData(16, 52, 1, 1).data;
+      bm.close();
+      postMessage({ id: d.id, ok: ok && a[0] > 150 && a[2] < 100 && b[2] > 150 && b[0] < 100 });
+      return;
+    }
+    const s = Math.min(1, d.maxSide / Math.max(bm.width, bm.height));
+    const cw = Math.max(1, Math.round(bm.width * s)), ch = Math.max(1, Math.round(bm.height * s));
+    const c = new OffscreenCanvas(cw, ch), g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch); g.drawImage(bm, 0, 0, cw, ch); bm.close();
+    const jpg = await c.convertToBlob({ type: 'image/jpeg', quality: d.q });
+    if (jpg.type !== 'image/jpeg') throw new Error('Máy không nén được ảnh');
+    const ts = 240 / Math.max(cw, ch), tw = Math.max(1, Math.round(cw * ts)), th = Math.max(1, Math.round(ch * ts));
+    const t = new OffscreenCanvas(tw, th), tg = t.getContext('2d'); tg.imageSmoothingQuality = 'high'; tg.drawImage(c, 0, 0, tw, th);
+    const thumb = new FileReaderSync().readAsDataURL(await t.convertToBlob({ type: 'image/jpeg', quality: 0.7 }));
+    const buf = await jpg.arrayBuffer();
+    postMessage({ id: d.id, buf, w: cw, h: ch, thumb }, [buf]);
+  } catch (err) { postMessage({ id: d.id, err: String(err && err.message || err) }); }
+};`;
+// Ảnh mẫu 64×32, nửa trái đỏ, nửa phải xanh, có EXIF xoay 90°: để thử máy có xoay ảnh đúng chiều không.
+const ANH_MAU = '/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAAgAEADAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5/r8kP9CwoAKACgDxyv8AWY/zJCgAoAKAPY6/yZP9NgoAKACgDxyv9Zj/ADJCgAoAKAPY6/yZP9NgoAKACgDxyv8AWY/zJCgAoAKAPY6/yZP9NgoAKACgDxyv9Zj/ADJCgAoAKAP/2Q==';
+const WK = { w: null, ok: null, seq: 0, wait: new Map() };
+function wkStop(msg) {
+  if (WK.w) WK.w.terminate();
+  WK.w = null; WK.ok = null;
+  for (const x of WK.wait.values()) x.rej(new Error(msg));
+  WK.wait.clear();
+}
+function wkCall(msg, ms) {
+  return new Promise((res, rej) => {
+    const id = ++WK.seq;
+    const t = setTimeout(() => wkStop('Xử lý ảnh quá lâu'), ms);
+    WK.wait.set(id, { res: v => { clearTimeout(t); res(v); }, rej: e => { clearTimeout(t); rej(e); } });
+    WK.w.postMessage(Object.assign({ id }, msg));
+  });
+}
+async function useWorker() {
+  if (WK.ok !== null) return WK.ok;
+  WK.ok = false;
+  try {
+    if (!window.Worker || !window.OffscreenCanvas || !window.createImageBitmap) return false;
+    WK.w = new Worker(URL.createObjectURL(new Blob([WORKER_CODE], { type: 'text/javascript' })));
+    WK.w.onmessage = e => {
+      const d = e.data, x = WK.wait.get(d.id); if (!x) return;
+      WK.wait.delete(d.id);
+      if (d.err) x.rej(new Error(d.err)); else x.res(d);
+    };
+    WK.w.onerror = () => wkStop('Luồng xử lý ảnh bị lỗi');
+    const t = await wkCall({ test: true, file: new Blob([b64ToBuf(ANH_MAU)], { type: 'image/jpeg' }) }, 8000);
+    WK.ok = t.ok === true;
+  } catch (e) { WK.ok = false; }
+  if (!WK.ok && WK.w) { WK.w.terminate(); WK.w = null; }
+  return WK.ok;
+}
+async function processImage(file, maxSide) {
+  if (await useWorker()) {
+    try {
+      const d = await wkCall({ file, maxSide, q: QUALITY }, 40000);
+      return { buf: d.buf, w: d.w, h: d.h, thumb: d.thumb };
+    } catch (e) { /* luồng riêng lỗi: làm lại theo cách cũ */ }
+  }
+  return processImageCu(file, maxSide);
 }
 
 /* ---------- gộp ảnh thành PDF (không cần thư viện) ---------- */
@@ -341,7 +419,7 @@ async function pump() {
       if (navigator.onLine === false) break;
       const now = Date.now();
       const r = [...S.recs.values()]
-        .filter(x => x.status === 'cho' || x.status === 'cho-xoa' || (x.status === 'loi' && x.retryAt && x.retryAt <= now))
+        .filter(x => (x.status === 'cho' || x.status === 'cho-xoa' || (x.status === 'loi' && x.retryAt && x.retryAt <= now)) && !hasPending(x))
         .sort((a, b) => (a.queuedAt || 0) - (b.queuedAt || 0))[0];
       if (!r) break;
       if (r.status === 'cho-xoa' || (r.status === 'loi' && !r.pages.length)) await sendDelete(r);
@@ -402,26 +480,55 @@ function retryAll() {
 }
 
 /* ---------- thao tác trên bài ---------- */
-async function addFiles(files, sid, replacePid) {
+// Chụp xong là chụp tiếp được ngay. Ảnh vào hàng chờ, xử lý lần lượt từng ảnh; trang đang chờ có p.cho = true.
+const hasPending = r => r.pages.some(p => p.cho);
+function addFiles(files, sid, replacePid) {
   const r = S.recs.get(sid);
   if (!r || !files.length) return;
-  busy(files.length > 1 ? 'Đang xử lý ' + files.length + ' ảnh…' : 'Đang xử lý ảnh…');
+  let first = true;
+  for (const f of files) {
+    const page = { pid: uid(), w: 0, h: 0, thumb: '', at: Date.now(), cho: true };
+    const i = first && replacePid ? r.pages.findIndex(p => p.pid === replacePid && !p.cho) : -1;
+    if (i >= 0) { page.old = r.pages[i]; r.pages[i] = page; }   // chụp lại: giữ trang cũ tới khi ảnh mới xử lý xong
+    else r.pages.push(page);
+    first = false;
+    S.work.push({ sid, pid: page.pid, file: f });
+  }
+  touch(r); saveRec(r); render();
+  work();
+}
+async function work() {
+  if (S.working) return;
+  S.working = true;
   try {
-    let first = true;
-    for (const f of files) {
+    while (S.work.length) {
+      const job = S.work.shift();
+      const r = S.recs.get(job.sid);
+      if (!r || !r.pages.some(p => p.pid === job.pid)) continue;   // trang đã bị xoá trong lúc chờ
+      let im = null, err = null;
       try {
-        const im = await processImage(f, cfg.maxSide || 2600);
-        const pid = uid();
-        await DB.putImg(pid, { buf: im.buf, w: im.w, h: im.h });
-        const page = { pid, w: im.w, h: im.h, thumb: im.thumb, at: Date.now() };
-        const i = first && replacePid ? r.pages.findIndex(p => p.pid === replacePid) : -1;
-        if (i >= 0) { const old = r.pages[i].pid; r.pages[i] = page; DB.delImg(old).catch(() => {}); }
-        else r.pages.push(page);
-        first = false;
-        touch(r); await saveRec(r); render();
-      } catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); }
+        im = await processImage(job.file, cfg.maxSide || 2600);
+        await DB.putImg(job.pid, { buf: im.buf, w: im.w, h: im.h });
+      } catch (e) { err = e; }
+      const k = r.pages.findIndex(p => p.pid === job.pid);
+      if (k < 0) { if (im) DB.delImg(job.pid).catch(() => {}); continue; }
+      const old = r.pages[k].old;
+      if (err) {
+        if (old) r.pages[k] = old; else r.pages.splice(k, 1);
+        toast('Không đọc được ảnh trang ' + (k + 1) + ', thầy chụp lại nhé. (' + (err && err.message || err) + ')', 5000);
+        r.rev++;
+        const dangMo = S.screen === 'hs' && S.sid === r.sid;
+        if (!r.pages.length && !dangMo && r.status !== 'dang') {
+          if (r.fileName) queue(r); else { S.recs.delete(r.sid); DB.del(r.sid).catch(() => {}); render(); continue; }
+        }
+      } else {
+        r.pages[k] = { pid: job.pid, w: im.w, h: im.h, thumb: im.thumb, at: r.pages[k].at };
+        if (old) DB.delImg(old.pid).catch(() => {});
+      }
+      await saveRec(r); render();
+      pump();
     }
-  } finally { busy(); }
+  } finally { S.working = false; }
 }
 async function delPage(sid, pid) {
   const r = S.recs.get(sid); if (!r) return;
@@ -479,15 +586,10 @@ function toast(msg, ms) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms || 3200);
 }
-let busyN = 0;
-function busy(text) {
-  if (text) { busyN++; $('#busyText').textContent = text; }
-  else busyN = Math.max(0, busyN - 1);
-  $('#busy').classList.toggle('on', busyN > 0);
-}
 function recStatus(r) {
   if (!r || !r.pages.length) return { cls: 'none', text: 'Chưa chụp' };
   const n = r.pages.length + ' trang';
+  if (hasPending(r)) return { cls: 'dang', text: n + ' · đang xử lý ảnh' };
   if (r.status === 'xong') return { cls: 'xong', text: n + ' · đã lưu ✓' };
   if (r.status === 'dang') return { cls: 'dang', text: n + ' · đang lưu' };
   if (r.status === 'loi') return { cls: 'loi', text: n + ' · lỗi' };
@@ -557,7 +659,7 @@ function render() {
 }
 function rowHtml(r) {
   const st = recStatus(r);
-  const th = r.pages[0] ? '<img class="th" alt="" src="' + r.pages[0].thumb + '">' : '';
+  const th = r.pages[0] && r.pages[0].thumb ? '<img class="th" alt="" src="' + r.pages[0].thumb + '">' : '';
   return '<div class="st" data-act="open" data-sid="' + esc(r.sid) + '"><span class="no">' + pad2(r.n) + '</span>' + th + '<span class="nm">Bài ' + pad2(r.n) + '</span><span class="tag ' + st.cls + '">' + st.text + '</span></div>';
 }
 function renderPaper(main, foot, footIn) {
@@ -568,7 +670,8 @@ function renderPaper(main, foot, footIn) {
   if (pages.length) {
     const s = r.status;
     let msg;
-    if (s === 'xong') msg = '✓ Đã lưu lên Drive (' + pages.length + ' trang trong 1 file PDF).' + (r.fileUrl ? ' <a href="' + esc(r.fileUrl) + '" target="_blank" rel="noopener">Mở file</a>' : '');
+    if (hasPending(r)) { msg = 'Đang xử lý ảnh… Thầy cứ chụp tiếp, không cần chờ.'; }
+    else if (s === 'xong') msg = '✓ Đã lưu lên Drive (' + pages.length + ' trang trong 1 file PDF).' + (r.fileUrl ? ' <a href="' + esc(r.fileUrl) + '" target="_blank" rel="noopener">Mở file</a>' : '');
     else if (s === 'dang') msg = 'Đang gộp và lưu lên Drive…';
     else if (s === 'loi') msg = '⚠ ' + esc(r.err) + ' <button class="btn sm" data-act="retryOne">Thử lại</button>';
     else if (s === 'cho') msg = 'Đang chờ gửi lên Drive.';
@@ -580,7 +683,8 @@ function renderPaper(main, foot, footIn) {
   h += '<button class="btn pri big" data-act="cam">📷 Chụp trang ' + (pages.length + 1) + '</button>';
   h += '<div class="row" style="margin:10px 0 14px"><button class="btn grow" data-act="pick">Chọn ảnh có sẵn</button></div>';
   if (pages.length) {
-    h += '<div class="pages">' + pages.map((p, i) =>
+    h += '<div class="pages">' + pages.map((p, i) => p.cho ?
+      '<div class="pg"><div class="wait"><span class="spin"></span>Đang xử lý…</div><div class="cap"><span>Trang ' + (i + 1) + '</span></div></div>' :
       '<div class="pg"><img alt="Trang ' + (i + 1) + '" src="' + p.thumb + '" data-act="preview" data-pid="' + p.pid + '">' +
       '<div class="cap"><span>Trang ' + (i + 1) + '</span><span>' +
       (i > 0 ? '<button class="btn sm icon-btn" data-act="up" data-pid="' + p.pid + '" aria-label="Đưa lên trước">↑</button>' : '') +
@@ -828,6 +932,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     for (const r of await DB.all()) S.recs.set(r.sid, r);
   } catch (e) { toast('Máy không cho lưu tạm ảnh. Thầy mở bằng Chrome hoặc Safari thường (không ẩn danh).', 6000); }
   for (const r of S.recs.values()) {
+    // Trang đang xử lý dở khi tải lại trang thì mất ảnh: bỏ đi (chụp lại thì trả về trang cũ).
+    if (hasPending(r)) { r.pages = r.pages.map(p => p.cho ? p.old : p).filter(Boolean); r.rev++; saveRec(r); }
     if (r.status === 'dang') r.status = r.pages.length ? 'cho' : 'cho-xoa';
     if (r.status === 'nhap' && !(view && view.screen === 'hs' && view.sid === r.sid)) {
       if (r.pages.length && r.rev !== r.sentRev) queue(r);
