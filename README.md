@@ -18,19 +18,20 @@ App chụp bài kiểm tra trên điện thoại. Mỗi em chụp 2–3 trang, a
 
 ### Bước 1. Tạo máy chủ lưu bài trên Google Apps Script
 
-1. Mở https://script.google.com bằng tài khoản Google muốn lưu bài, bấm **Dự án mới** (New project).
-2. Xoá hết mã có sẵn. Mở [mã máy chủ dạng văn bản thuần](https://raw.githubusercontent.com/VTThinh28/chup-bai-drive/main/apps-script/Code.gs), bấm Ctrl+A rồi Ctrl+C, quay lại dán vào. (Hoặc mở file [`apps-script/Code.gs`](apps-script/Code.gs) trong kho này và bấm nút **Copy raw file**.)
-3. Sửa dòng `const MA_BI_MAT = 'doi-ma-nay';` thành mã riêng, ví dụ `const MA_BI_MAT = 'ma-rieng-6789';`. Mã dài ít nhất 6 kí tự, giữ nguyên hai dấu nháy.
-4. Bấm biểu tượng **Lưu**. Đặt tên dự án, ví dụ "Chụp bài → Drive".
-5. Chọn hàm `kiemTra` trên thanh công cụ, bấm **Chạy** (Run). Google hỏi quyền: chọn tài khoản → **Nâng cao** (Advanced) → **Chuyển đến … (không an toàn)** → **Cho phép** (Allow). Đây là mã của chính thầy cô, chỉ chạy trong tài khoản của mình.
-6. Bấm **Triển khai** (Deploy) → **Lần triển khai mới** (New deployment) → bánh răng cạnh "Chọn loại" → **Ứng dụng web** (Web app), rồi chọn:
+1. Trên máy tính, mở app, bấm **⚙** (Cài đặt) → **Chép mã máy chủ**. App tự tạo một mã bí mật, điền sẵn vào mã máy chủ và chép toàn bộ mã.
+2. Mở https://script.google.com bằng tài khoản Google muốn lưu bài, bấm **Dự án mới** (New project). Xoá hết mã có sẵn, dán mã vừa chép vào (Ctrl+V).
+3. Bấm biểu tượng **Lưu**. Đặt tên dự án, ví dụ "Chụp bài → Drive".
+4. Chọn hàm `kiemTra` trên thanh công cụ, bấm **Chạy** (Run). Google hỏi quyền: chọn tài khoản → **Nâng cao** (Advanced) → **Chuyển đến … (không an toàn)** → **Cho phép** (Allow). Đây là mã của chính thầy cô, chỉ chạy trong tài khoản của mình.
+5. Bấm **Triển khai** (Deploy) → **Lần triển khai mới** (New deployment) → bánh răng cạnh "Chọn loại" → **Ứng dụng web** (Web app), rồi chọn:
    - Thực thi với tư cách (Execute as): **Tôi** (Me)
    - Người có quyền truy cập (Who has access): **Bất kỳ ai** (Anyone)
-7. Bấm **Triển khai**. Chép **URL ứng dụng web**, dạng `https://script.google.com/macros/s/…/exec`.
+6. Bấm **Triển khai**. Chép **URL ứng dụng web**, dạng `https://script.google.com/macros/s/…/exec`.
+
+Nút **Chép mã máy chủ** không dùng được thì chép tay: mở [mã máy chủ dạng văn bản thuần](https://raw.githubusercontent.com/VTThinh28/chup-bai-drive/main/apps-script/Code.gs), bấm Ctrl+A rồi Ctrl+C, dán vào script.google.com. Sửa dòng `const MA_BI_MAT = 'doi-ma-nay';` thành mã riêng, ví dụ `const MA_BI_MAT = 'ma-rieng-6789';` (ít nhất 6 kí tự, giữ nguyên hai dấu nháy), rồi gõ đúng mã đó vào ô **Mã bí mật** trong Cài đặt của app.
 
 ### Bước 2. Kết nối app với máy chủ
 
-1. Mở app trên máy tính, bấm **⚙ Cài đặt**, dán URL ở bước 1 và nhập mã bí mật, bấm **Lưu và kiểm tra**. Thấy "✓ Đã kết nối" là được.
+1. Quay lại app trên máy tính, mở **⚙ Cài đặt**, dán URL ở bước 1 vào ô **Địa chỉ máy chủ** (mã bí mật đã có sẵn), bấm **Lưu và kiểm tra**. Thấy "✓ Đã kết nối" là được.
 2. Bấm **Mã QR cho điện thoại** và dùng camera điện thoại quét mã. App mở trên điện thoại với cài đặt có sẵn.
 3. Thêm app ra màn hình chính cho tiện: Chrome → ⋮ → **Thêm vào màn hình chính**; Safari → nút Chia sẻ → **Thêm vào MH chính**.
 
@@ -63,7 +64,7 @@ Mẹo chụp: đặt bài trên mặt bàn, chụp thẳng từ trên xuống, �
 
 - **"Máy chủ trả về trang web thay vì dữ liệu"**: lúc triển khai chưa chọn "Bất kỳ ai", hoặc URL không có đuôi `/exec`.
 - **"Sai mã bí mật"**: mã trong app khác dòng `MA_BI_MAT`.
-- **"Máy chủ chưa đổi mã bí mật"**: chưa làm bước 1.3.
+- **"Máy chủ chưa đổi mã bí mật"**: mã dán vào script.google.com vẫn còn dòng `'doi-ma-nay'`. Bấm lại **Chép mã máy chủ** rồi dán đè, hoặc sửa tay dòng đó.
 - **Sửa Code.gs sau khi đã triển khai** (đổi mã, đổi thư mục): **Triển khai → Quản lý các lần triển khai** (Manage deployments) → biểu tượng bút chì → Phiên bản: **Phiên bản mới** (New version) → **Triển khai**. URL giữ nguyên.
 - **Muốn lưu vào thư mục có sẵn**: điền mã thư mục vào dòng `ID_THU_MUC_GOC` trong Code.gs, rồi triển khai phiên bản mới.
 - **Đổi điện thoại**: mở app trên máy mới, quét lại mã QR, nhập lại danh sách lớp.
@@ -73,6 +74,10 @@ Mẹo chụp: đặt bài trên mặt bàn, chụp thẳng từ trên xuống, �
 - Kho GitHub này chỉ chứa mã của app, không có tên học sinh hay ảnh bài làm.
 - Ảnh tạm, danh sách lớp, địa chỉ máy chủ và mã bí mật chỉ lưu trong trình duyệt của máy đang dùng. Ảnh của các bài đã lưu lên Drive có thể dọn trong Cài đặt.
 - File PDF lưu trong Google Drive của chính thầy cô. Máy chủ chỉ nhận lệnh khi có đúng mã bí mật.
+
+## Dành cho chủ kho GitHub
+
+App chạy trên GitHub Pages. Bật một lần: **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`, thư mục `/ (root)` → Save**. Khoảng 1–2 phút sau, app có ở địa chỉ `https://<tên-tài-khoản>.github.io/chup-bai-drive/`.
 
 ## Thành phần
 

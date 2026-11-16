@@ -678,7 +678,7 @@ function render() {
   const v = classView();
   let h = '';
   if (!cfg.api || !cfg.key) {
-    h += '<div class="card"><h2>Chưa kết nối Google Drive</h2><p class="muted small" style="margin:0 0 10px">Thầy cài máy chủ lưu ảnh theo hướng dẫn, rồi dán địa chỉ máy chủ và mã bí mật vào Cài đặt.</p>' +
+    h += '<div class="card"><h2>Chưa kết nối Google Drive</h2><p class="muted small" style="margin:0 0 10px">Làm một lần trên máy tính: mở Cài đặt, bấm “Chép mã máy chủ”, dán vào script.google.com và triển khai theo hướng dẫn. Điện thoại thì quét mã QR trong Cài đặt của máy tính là xong.</p>' +
          '<div class="row"><button class="btn pri" data-act="settings">Mở Cài đặt</button><a class="btn" href="' + REPO + '#readme" target="_blank" rel="noopener">Xem hướng dẫn</a></div></div>';
   }
   h += '<div class="card"><div class="grid2">' +
@@ -789,9 +789,10 @@ function showSettings() {
   const m = openModal(
     '<h3>Cài đặt</h3>' +
     '<div class="sec"><b>Kết nối Google Drive</b>' +
+    (cfg.api ? '' : '<p class="small muted" style="margin:6px 0 0">Lần đầu dùng: trên máy tính, bấm “Chép mã máy chủ”, dán vào script.google.com rồi triển khai thành ứng dụng web (<a href="' + REPO + '#readme" target="_blank" rel="noopener">xem hướng dẫn</a>). Xong thì dán địa chỉ đuôi /exec vào ô bên dưới.</p>') +
     '<label class="f" for="sApi" style="margin-top:10px">Địa chỉ máy chủ (URL ứng dụng web, đuôi /exec)</label><input class="inp" id="sApi" value="' + esc(cfg.api) + '" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">' +
     '<label class="f" for="sKey" style="margin-top:10px">Mã bí mật</label><input class="inp" id="sKey" value="' + esc(cfg.key) + '" autocomplete="off" autocapitalize="off" spellcheck="false">' +
-    '<div class="acts"><button class="btn pri" id="sTest">Lưu và kiểm tra</button><button class="btn" id="sQr">Mã QR cho điện thoại</button></div>' +
+    '<div class="acts"><button class="btn pri" id="sTest">Lưu và kiểm tra</button><button class="btn" id="sQr">Mã QR cho điện thoại</button><button class="btn" id="sCode">Chép mã máy chủ</button></div>' +
     '<p class="small" id="sMsg" style="margin:10px 0 0"></p></div>' +
     '<div class="sec"><b>Danh sách lớp</b>' +
     (cls.length ? cls.map(c => '<div class="cls"><span class="grow">Lớp ' + esc(c) + ' <span class="muted small">· ' + cfg.lops[c].length + ' em</span></span><button class="btn sm" data-edit="' + esc(c) + '">Sửa</button><button class="btn sm danger" data-del="' + esc(c) + '">Xoá</button></div>').join('') : '<p class="muted small">Chưa có lớp nào.</p>') +
@@ -811,16 +812,34 @@ function showSettings() {
   };
   m.querySelector('#sTest').onclick = async () => {
     saveConn();
-    if (cfg.api && !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec\/?$/.test(cfg.api) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(cfg.api)) {
-      msg.innerHTML = '<span style="color:var(--warn)">Địa chỉ thường có dạng https://script.google.com/macros/s/…/exec. Thầy kiểm tra lại nhé.</span>';
-    }
+    const lech = cfg.api && !/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec\/?$/.test(cfg.api) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(cfg.api);
     msg.textContent = 'Đang kiểm tra…';
     try {
       const j = await api({ action: 'ping' }, 30000);
       msg.innerHTML = '<span style="color:var(--ok)">✓ Đã kết nối.</span> Bài lưu vào thư mục <a href="' + esc(j.rootUrl) + '" target="_blank" rel="noopener">' + esc(j.rootName) + '</a> trên Drive.';
       pump();
-    } catch (e) { msg.innerHTML = '<span style="color:var(--err)">✗ ' + esc(e.message) + '</span>'; }
+    } catch (e) {
+      msg.innerHTML = '<span style="color:var(--err)">✗ ' + esc(e.message) + '</span>' +
+        (lech ? '<br><span style="color:var(--warn)">Địa chỉ đúng có dạng https://script.google.com/macros/s/…/exec. Thầy kiểm tra lại nhé.</span>' : '');
+    }
     syncPill();
+  };
+  prefetchCode();
+  m.querySelector('#sCode').onclick = () => {
+    const inp = m.querySelector('#sKey');
+    let key = inp.value.trim();
+    if (!okKey(key)) { key = newKey(); inp.value = key; }
+    saveConn();
+    if (!S.codeText) {
+      msg.innerHTML = '<span style="color:var(--warn)">Chưa tải xong mã máy chủ. Thầy chờ vài giây rồi bấm lại, hoặc mở hướng dẫn để chép tay.</span>';
+      prefetchCode();
+      return;
+    }
+    const code = S.codeText.replace(KEY_RE, () => "const MA_BI_MAT = '" + key + "';");
+    copyText(code, 'Đã chép mã máy chủ.', true).then(ok => {
+      if (ok) msg.innerHTML = '<span style="color:var(--ok)">✓ Đã chép mã máy chủ.</span> Mã bí mật <b>' + esc(key) + '</b> đã điền sẵn trong mã. Thầy dán vào script.google.com rồi triển khai, xong dán địa chỉ /exec vào ô trên.';
+      else showCode(code, key);
+    });
   };
   m.querySelector('#sQr').onclick = () => { saveConn(); showQr(); };
   m.querySelector('#sImp').onclick = () => { closeModal(); pickListFile(); };
@@ -873,11 +892,42 @@ function loadScript(src) {
     const s = document.createElement('script'); s.src = src; s.dataset.src = src; s.onload = () => res(); s.onerror = () => rej(new Error('load')); document.head.appendChild(s);
   });
 }
-async function copyText(t) {
-  try { await navigator.clipboard.writeText(t); toast('Đã chép link.'); return; } catch (e) {}
-  const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); toast('Đã chép link.'); } catch (e) { toast('Máy không cho chép, thầy giữ ngón tay lên link để chép.'); }
+async function copyText(t, okMsg, quiet) {
+  okMsg = okMsg || 'Đã chép link.';
+  try { await navigator.clipboard.writeText(t); toast(okMsg); return true; } catch (e) {}
+  const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
   ta.remove();
+  if (ok) toast(okMsg);
+  else if (!quiet) toast('Máy không cho chép, thầy giữ ngón tay lên link để chép.');
+  return ok;
+}
+
+/* ---------- mã máy chủ có sẵn mã bí mật, để dán vào script.google.com ---------- */
+const KEY_RE = /const MA_BI_MAT = '[^'\n]*';/;
+function newKey() {
+  const A = 'abcdefghjkmnpqrstuvwxyz23456789', b = new Uint8Array(10);
+  crypto.getRandomValues(b);
+  return 'cb-' + Array.from(b, x => A[x % A.length]).join('');
+}
+const okKey = k => k.length >= 6 && k !== 'doi-ma-nay' && !/['\\\r\n]/.test(k);
+function prefetchCode() {
+  if (S.codeText || S.codeLoading) return;
+  S.codeLoading = true;
+  fetch('apps-script/Code.gs', { cache: 'no-cache' })
+    .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(t => { if (KEY_RE.test(t)) S.codeText = t; })
+    .catch(() => {})
+    .finally(() => { S.codeLoading = false; });
+}
+function showCode(code, key) {
+  const m = openModal('<h3>Mã máy chủ</h3><p class="muted small" style="margin:0 0 10px">Máy không cho chép tự động. Thầy bấm “Chọn hết”, chép (Ctrl+C) rồi dán vào script.google.com. Mã bí mật đã điền sẵn: <b>' + esc(key) + '</b></p>' +
+    '<textarea class="inp" id="cCode" readonly spellcheck="false" style="font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;min-height:240px">' + esc(code) + '</textarea>' +
+    '<div class="acts"><button class="btn" id="cSel">Chọn hết</button><button class="btn pri" id="cClose">Đóng</button></div>');
+  const ta = m.querySelector('#cCode');
+  m.querySelector('#cSel').onclick = () => { ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); };
+  m.querySelector('#cClose').onclick = () => closeModal();
 }
 function showPaste(lop) {
   const names = lop ? (cfg.lops[lop] || []) : [];
